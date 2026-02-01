@@ -1,43 +1,68 @@
 #!/bin/bash
 
 # Usage:
-# ./export_code.sh ml-inferences-advanced/rag-ocr-pipeline/ output.txt __pycache__
+# ./export_code.sh <input_dirs> <include_files> <ignore_dirs> <output_file>
+#
 
-
-SRC_DIR="$1"
-OUTPUT_FILE="$2"
+INPUT_DIRS="$1"
+INCLUDE_FILES="$2"
 IGNORE_DIRS="$3"
+OUTPUT_FILE="$4"
 SEPARATOR="###__FILE_SEPARATOR__###"
 
-if [[ -z "$SRC_DIR" || -z "$OUTPUT_FILE" ]]; then
-    echo "Usage: $0 <source_dir> <output_file> [ignore_dirs_comma_separated]"
+if [[ -z "$INPUT_DIRS" || -z "$OUTPUT_FILE" ]]; then
+    echo "Usage: $0 <input_dirs> <include_files> <ignore_dirs> <output_file>"
     exit 1
 fi
 
-# Build find prune expression for ignored dirs
-PRUNE_EXPR=""
+# Parse input directories
+IFS=',' read -ra SRC_DIRS <<< "$INPUT_DIRS"
+
+# Parse manually included files
+IFS=',' read -ra EXTRA_FILES <<< "$INCLUDE_FILES"
+
+# Prepare ignore arguments safely
+FIND_IGNORE_ARGS=()
 if [[ -n "$IGNORE_DIRS" ]]; then
     IFS=',' read -ra DIRS <<< "$IGNORE_DIRS"
     for dir in "${DIRS[@]}"; do
-        PRUNE_EXPR+=" -path */$dir/* -prune -o"
+        FIND_IGNORE_ARGS+=(-path "*/$dir" -o -path "*/$dir/*")
     done
 fi
 
-# Empty the output file
+# Empty output file
 > "$OUTPUT_FILE"
 
-# Use eval to allow dynamic prune expression
-eval find "\"$SRC_DIR\"" \
-    $PRUNE_EXPR \
-    -type f -print | while read -r FILE; do
+# Export files from input directories
+for SRC_DIR in "${SRC_DIRS[@]}"; do
+    if [[ ! -d "$SRC_DIR" ]]; then
+        echo "Warning: '$SRC_DIR' is not a directory, skipping."
+        continue
+    fi
 
+    if [[ ${#FIND_IGNORE_ARGS[@]} -gt 0 ]]; then
+        find "$SRC_DIR" \( "${FIND_IGNORE_ARGS[@]}" \) -prune -o -type f -print
+    else
+        find "$SRC_DIR" -type f -print
+    fi
+done | sort -u | while read -r FILE; do
     echo "$SEPARATOR $FILE" >> "$OUTPUT_FILE"
     cat "$FILE" >> "$OUTPUT_FILE"
     echo -e "\n" >> "$OUTPUT_FILE"
-
 done
 
-# Footer instructions (NO separator used here)
+# Export manually included files
+for FILE in "${EXTRA_FILES[@]}"; do
+    if [[ -f "$FILE" ]]; then
+        echo "$SEPARATOR $FILE" >> "$OUTPUT_FILE"
+        cat "$FILE" >> "$OUTPUT_FILE"
+        echo -e "\n" >> "$OUTPUT_FILE"
+    else
+        echo "Warning: include file '$FILE' not found, skipping."
+    fi
+done
+
+# Footer instructions (NO separator here)
 cat <<EOF >> "$OUTPUT_FILE"
 
 INSTRUCTIONS
@@ -45,7 +70,7 @@ INSTRUCTIONS
 - This file contains the full source code combined into a single file.
 - Each source file is preceded by a separator line in the following format:
 
-    $SEPARATOR <relative_file_path>
+    $SEPARATOR <file_path>
 
 - You may modify the code freely, BUT:
     - Do NOT remove or alter any separator lines
@@ -56,11 +81,10 @@ INSTRUCTIONS
 - This format is required so the import script can correctly reconstruct
   the original directory structure and files.
 
-IMPORTANT: Return the entire content as a single continuous file.
-Do not divide the output into multiple code blocks, messages, or segments.
-Any splitting will break the import process.
+IMPORTANT:
+Return the entire content as a single continuous code block seprated by ###__FILE_SEPARATOR__### for a single copy 
+Do NOT divide the output into multiple code blocks, messages, or segments.
 
 EOF
 
-
-echo "Exported all files from '$SRC_DIR' to '$OUTPUT_FILE'."
+echo "Export completed → '$OUTPUT_FILE'"

@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# Usage: ./import_code.sh output.txt ./ml-inferences-advanced/test
-
 COMBINED_FILE="$1"
 OUTPUT_DIR="$2"
 SEPARATOR="###__FILE_SEPARATOR__###"
@@ -13,23 +11,24 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 
-# Read combined file line by line
 current_file=""
-while IFS= read -r line; do
-    if [[ "$line" == $SEPARATOR* ]]; then
-        # New file, extract path
+
+while IFS= read -r line || [[ -n "$line" ]]; do
+    # Trim leading whitespace
+    trimmed_line="$(echo "$line" | sed 's/^[[:space:]]*//')"
+
+    if [[ "$trimmed_line" == $SEPARATOR* ]]; then
+        # Close previous file descriptor
         if [[ -n "$current_file" ]]; then
-            # Close previous file
             exec 3>&-
         fi
-        # Extract relative path
-        file_path="${line#$SEPARATOR }"
+
+        file_path="${trimmed_line#$SEPARATOR }"
         current_file="$OUTPUT_DIR/$file_path"
+
         mkdir -p "$(dirname "$current_file")"
-        # Open file for writing
         exec 3>"$current_file"
     else
-        # Write line to current file
         if [[ -n "$current_file" ]]; then
             echo "$line" >&3
         fi
@@ -37,6 +36,8 @@ while IFS= read -r line; do
 done < "$COMBINED_FILE"
 
 # Close last file
-exec 3>&-
+if [[ -n "$current_file" ]]; then
+    exec 3>&-
+fi
 
 echo "Imported files to '$OUTPUT_DIR'."
